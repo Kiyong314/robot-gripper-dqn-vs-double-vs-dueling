@@ -1,0 +1,30 @@
+# ========================================
+# Robot Gripper DQN vs Double vs Dueling
+# Deep Reinforcement Learning Dependencies
+# ========================================
+
+# 과학 계산
+numpy>=1.21.0
+scipy>=1.7.0
+
+# 컴퓨터 비전
+opencv-python>=4.5.0
+
+# 딥러닝 (PyTorch)
+# CUDA 버전에 맞게 설치 필요
+# CPU only: pip install torch torchvision
+# CUDA 11.8: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+torch>=1.9.0
+torchvision>=0.10.0
+
+# 시각화
+matplotlib>=3.4.0
+
+# CoppeliaSim ZMQ Remote API
+# CoppeliaSim 4.4+ 필요
+coppeliasim-zmqremoteapi-client>=1.0.0
+
+# ZMQ 통신 (CoppeliaSim 연결용)
+pyzmq>=22.0.0
+cbor2>=5.4.0
+

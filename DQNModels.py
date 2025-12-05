@@ -181,9 +181,44 @@ class DQN(nn.Module):
         return interm_feat
 
     def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d): 
-                nn.init.kaiming_normal_(m.weight.data)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+        """
+        새로 추가된 레이어만 초기화 (Pretrained DenseNet 백본 제외)
+        
+        주의: self.modules()는 모든 하위 모듈을 순회하므로,
+        feature_tunk.dense121의 pretrained weights까지 덮어쓰게 됨.
+        따라서 새로 추가된 레이어(graspnet, value_stream, advantage_stream)만 초기화.
+        """
+        # 초기화할 레이어 목록 (pretrained backbone 제외)
+        layers_to_init = []
+        
+        if self.dueling:
+            # Dueling DQN: value_stream, advantage_stream
+            layers_to_init.extend([self.value_stream, self.advantage_stream])
+        else:
+            # Standard DQN: graspnet
+            layers_to_init.append(self.graspnet)
+        
+        # feature_tunk의 새로 추가된 레이어도 초기화 (color_extractor, depth_extractor)
+        # 단, dense121은 pretrained이므로 제외
+        layers_to_init.extend([
+            self.feature_tunk.color_extractor,
+            self.feature_tunk.depth_extractor
+        ])
+        
+        # dense121.conv0만 초기화 (4채널 입력용으로 새로 생성된 레이어)
+        nn.init.kaiming_normal_(self.feature_tunk.dense121.conv0.weight, mode='fan_out', nonlinearity='relu')
+        
+        # 지정된 레이어만 초기화
+        for layer in layers_to_init:
+            for m in layer.modules():
+                if isinstance(m, nn.Conv2d): 
+                    nn.init.kaiming_normal_(m.weight.data, mode='fan_out', nonlinearity='relu')
+                elif isinstance(m, nn.BatchNorm2d):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.Linear):
+                    nn.init.kaiming_normal_(m.weight.data)
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0)
+        
+        print('[DQN] Initialized new layers only (DenseNet pretrained backbone preserved)')

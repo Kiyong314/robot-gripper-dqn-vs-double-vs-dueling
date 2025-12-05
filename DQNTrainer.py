@@ -593,20 +593,23 @@ class DQNTrainer(object):
                 grasp_loss.backward()
                 loss_value = grasp_loss.cpu().data.numpy()
 
-                opposite_rotate_idx = int((best_pix_ind[0] + self.model.num_rotations/2) % self.model.num_rotations)
+                # Opposite rotation backward: num_rotations > 1일 때만 수행
+                # num_rotations=1일 때 opposite_rotate_idx=0이므로 같은 rotation에 대해 
+                # 두 번 backward하게 되어 gradient가 2배가 됨 (learning rate 2배 효과)
+                # → 학습 불안정성 초래할 수 있으므로 스킵
+                if self.model.num_rotations > 1:
+                    opposite_rotate_idx = int((best_pix_ind[0] + self.model.num_rotations/2) % self.model.num_rotations)
 
-                grasp_predictions, state_feat = self.forward(color_heightmap, depth_heightmap, is_volatile=False, specific_rotation=opposite_rotate_idx)
+                    grasp_predictions, state_feat = self.forward(color_heightmap, depth_heightmap, is_volatile=False, specific_rotation=opposite_rotate_idx)
 
-                if self.use_cuda:
-                    grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, output_size[0], output_size[1]), Variable(torch.from_numpy(label).float().cuda())) * Variable(torch.from_numpy(label_weights).float().cuda(),requires_grad=False)
-                else:
-                    grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, output_size[0], output_size[1]), Variable(torch.from_numpy(label).float())) * Variable(torch.from_numpy(label_weights).float(),requires_grad=False)
+                    if self.use_cuda:
+                        grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, output_size[0], output_size[1]), Variable(torch.from_numpy(label).float().cuda())) * Variable(torch.from_numpy(label_weights).float().cuda(),requires_grad=False)
+                    else:
+                        grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, output_size[0], output_size[1]), Variable(torch.from_numpy(label).float())) * Variable(torch.from_numpy(label_weights).float(),requires_grad=False)
 
-                grasp_loss = grasp_loss.sum()
-                grasp_loss.backward()
-                loss_value = grasp_loss.cpu().data.numpy()
-                
-                loss_value = loss_value/2
+                    grasp_loss = grasp_loss.sum()
+                    grasp_loss.backward()
+                    loss_value = (loss_value + grasp_loss.cpu().data.numpy()) / 2  # 두 loss 평균
 
             print('Training loss: %f' % (loss_value))
             self.optimizer.step()

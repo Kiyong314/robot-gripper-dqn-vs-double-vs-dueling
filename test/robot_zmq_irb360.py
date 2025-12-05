@@ -570,7 +570,7 @@ class RobotIRB360ZMQ(object):
             location_above_grasp_target = [
                 position[0], 
                 position[1], 
-                0.5
+                0.3
             ]
             
             # 1. Pick 위치 위로 이동
@@ -608,11 +608,12 @@ class RobotIRB360ZMQ(object):
             min_vacuum_z = 0  # VacuumCup이 바닥에서 최소 3cm
             min_ikTarget_z = min_vacuum_z + vacuum_cup_offset  # ikTarget 최소 높이
             
-            descent_step = 0.01  # 1cm씩 하강
+            descent_step = 0.015  # 1cm씩 하강
             max_iterations = 50
             
             current_z = location_above_grasp_target[2]
             object_found = False
+            grasped_object_handle = None  # 집힌 물체의 핸들 저장
             
             print(f'[GRASP] Starting descent from Z={current_z:.4f}m')
             print(f'[GRASP] Min ikTarget Z={min_ikTarget_z:.4f}m (VacuumCup at {min_vacuum_z:.4f}m)')
@@ -636,6 +637,7 @@ class RobotIRB360ZMQ(object):
                                 object_found = True
                                 detected = True
                                 detected_distance = distance
+                                grasped_object_handle = obj_handle  # 감지된 물체 핸들 저장
                                 break
                     except:
                         pass
@@ -738,6 +740,11 @@ class RobotIRB360ZMQ(object):
                 print('[GRASP] Step 11: Returning to home')
                 self.move_to(self.home_position, 0)
                 time.sleep(0.5)
+                
+                # 12. 성공한 물체를 object_handles에서 제거 (물체 개수 추적용)
+                if grasped_object_handle is not None and grasped_object_handle in self.object_handles:
+                    self.object_handles.remove(grasped_object_handle)
+                    print(f'[GRASP] Removed object from tracking (remaining: {len(self.object_handles)})')
                 
                 print('[SUCCESS] Pick and Place complete!')
                 return True

@@ -428,10 +428,19 @@ def main(args):
         empty_threshold = 200  # 기존 300 → 200으로 낮춤
         if is_sim and is_testing:
             empty_threshold = 10
-        if np.sum(stuff_count) < empty_threshold or (is_sim and no_change_count[0] > 10):
+        
+        # 실제 물체 개수 체크 (1개 이하면 씬 재시작)
+        actual_object_count = len(robot.object_handles) if hasattr(robot, 'object_handles') else 0
+        objects_too_few = is_sim and actual_object_count <= 1
+        
+        if objects_too_few:
+            print(f'[RESET] Too few objects remaining ({actual_object_count} <= 1)! Restarting scene...')
+        
+        if np.sum(stuff_count) < empty_threshold or (is_sim and no_change_count[0] > 10) or objects_too_few:
             no_change_count = [0]
             if is_sim:
-                print('Not enough objects in view (value: %d)! Repositioning objects.' % (np.sum(stuff_count)))
+                if not objects_too_few:
+                    print('Not enough objects in view (value: %d)! Repositioning objects.' % (np.sum(stuff_count)))
                 robot.restart_sim()
                 robot.add_objects()
                 if is_testing: # If at end of test run, re-load original weights (before test run)
@@ -634,7 +643,7 @@ if __name__ == '__main__':
     parser.add_argument('--method', dest='method', action='store', default='reinforcement',                               help='set to \'reactive\' (supervised learning) or \'reinforcement\' (reinforcement learning ie Q-learning)')
     parser.add_argument('--grasp_rewards', dest='grasp_rewards', action='store_true', default=True,                        help='use immediate rewards (from change detection) for pushing?')
     parser.add_argument('--future_reward_discount', dest='future_reward_discount', type=float, action='store', default=0.2)  # 논문 기준: γ = 0.2
-    parser.add_argument('--experience_replay', dest='experience_replay', action='store_true', default=False,              help='use prioritized experience replay?')
+    parser.add_argument('--experience_replay', dest='experience_replay', action='store_true', default=True,              help='use prioritized experience replay?')
     parser.add_argument('--double_dqn', dest='double_dqn', action='store_true', default=False,                            help='use Double DQN for more stable learning (prevents Q-value overestimation)')
     parser.add_argument('--target_update_freq', dest='target_update_freq', type=int, action='store', default=100,         help='frequency of target network update for Double DQN (iterations)')
     parser.add_argument('--dueling_dqn', dest='dueling_dqn', action='store_true', default=False,                          help='use Dueling DQN architecture (Value + Advantage streams)')

@@ -1,0 +1,46 @@
+============================================================
+Depth Image & Coordinate System Verification Report
+============================================================
+
+Timestamp: 20251201_193346
+
+Camera Information:
+  Position: [-0.49999997  0.          0.18      ]
+  Intrinsics:
+    [618.62   0.   320.  ]
+    [  0.   618.62 240.  ]
+    [0. 0. 1.]
+
+Depth Statistics:
+  Min: 0.1310m
+  Max: 0.1800m
+  Mean: 0.1768m
+  Std: 0.0087m
+  Valid pixels: 262144/262144
+
+Object Verification Results:
+
+  Object 0:
+    World Position: (-0.568, -0.068, 0.024)
+    Pixel Position: (np.int64(188), np.int64(187))
+    Camera Z: 0.156m
+    Depth Value: 0.179m
+    Error: 0.023m
+
+  Object 1:
+    World Position: (-0.355, -0.122, 0.024)
+    Pixel Position: (np.int64(401), np.int64(133))
+    Camera Z: 0.156m
+    Depth Value: 0.175m
+    Error: 0.019m
+
+  Object 2:
+    World Position: (-0.413, -0.074, 0.024)
+    Pixel Position: (np.int64(343), np.int64(181))
+    Camera Z: 0.156m
+    Depth Value: 0.179m
+    Error: 0.023m
+
+Error Statistics:
+  Mean Error: 0.0217m
+  Max Error: 0.0230m

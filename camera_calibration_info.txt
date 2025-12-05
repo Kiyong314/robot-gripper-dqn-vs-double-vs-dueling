@@ -1,0 +1,27 @@
+============================================================
+Camera Calibration (Template Matching)
+============================================================
+
+Marker 0:
+  World: (-0.6500, -0.1500)
+  Pixel: (106, 406)
+
+Marker 1:
+  World: (-0.3500, -0.1500)
+  Pixel: (406, 406)
+
+Marker 2:
+  World: (-0.3500, 0.1500)
+  Pixel: (406, 106)
+
+Marker 3:
+  World: (-0.6500, 0.1500)
+  Pixel: (106, 106)
+
+Homography Matrix H:
+  [1000.0000596    0.         756.0000149]
+  [   0.         -999.99996026  256.        ]
+  [0. 0. 1.]
+
+Average error: 1.21 pixels
+Maximum error: 1.41 pixels

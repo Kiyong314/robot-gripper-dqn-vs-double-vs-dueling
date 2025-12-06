@@ -1,9 +1,28 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Created on Fri Jan 22 17:49:37 2021
+Feature Extraction Network (DenseNet-121 기반)
 
-@author: marwan
+=============================================================================
+Original Code Attribution:
+    Repository: https://github.com/Marwanon/Learning-Pick-to-Place-Objects-in-a-cluttered-scene-using-deep-reinforcement-learning
+    Original Author: Marwan Qaid Mohammed
+    Paper: "Learning Pick to Place Objects using Self-supervised Learning with Minimal Training Resources"
+           International Journal of Advanced Computer Science and Applications (IJACSA), 12(10), 2021
+    
+    Based on: https://github.com/andyzeng/visual-pushing-grasping
+
+Modifications for this project:
+    - Python 3 호환성 수정
+    - 한국어 주석 추가
+    
+This code is used for educational purposes as part of a graduate project.
+=============================================================================
+
+주요 클래스:
+    - BasicBlock: ResNet 기본 블록
+    - ResFCN: Residual Fully Convolutional Network
+    - FeatureTrunk: DenseNet-121 기반 특징 추출기 (Color + Depth 융합)
 """
 
 import torch

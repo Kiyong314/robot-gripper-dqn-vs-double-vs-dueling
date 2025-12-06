@@ -159,10 +159,54 @@ python compute_calibration.py
 
 ## 📚 참고 문헌
 
-- [DQN Paper](https://www.nature.com/articles/nature14236) - Mnih et al., 2015
-- [Double DQN Paper](https://arxiv.org/abs/1509.06461) - Van Hasselt et al., 2016
-- [Dueling DQN Paper](https://arxiv.org/abs/1511.06581) - Wang et al., 2016
-- [Original Pick-to-Place Repository](https://github.com/marwan-AI/Learning-Pick-to-Place-Objects-in-a-cluttered-scene-using-deep-reinforcement-learning)
+### 논문
+- [DQN Paper](https://www.nature.com/articles/nature14236) - Mnih et al., "Human-level control through deep reinforcement learning", Nature, 2015
+- [Double DQN Paper](https://arxiv.org/abs/1509.06461) - Van Hasselt et al., "Deep Reinforcement Learning with Double Q-learning", AAAI, 2016
+- [Dueling DQN Paper](https://arxiv.org/abs/1511.06581) - Wang et al., "Dueling Network Architectures for Deep Reinforcement Learning", ICML, 2016
+
+### 참고 코드
+- [Visual Pushing Grasping](https://github.com/andyzeng/visual-pushing-grasping) - Andy Zeng et al.
+- [Learning Pick-to-Place Objects](https://github.com/Marwanon/Learning-Pick-to-Place-Objects-in-a-cluttered-scene-using-deep-reinforcement-learning) - Marwan Qaid Mohammed
+
+---
+
+## 🙏 Acknowledgments & Code Attribution
+
+이 프로젝트는 다음 오픈소스 프로젝트들을 기반으로 개발되었습니다.
+
+### 1. 기본 DQN 구현
+- **Repository**: [Marwanon/Learning-Pick-to-Place-Objects](https://github.com/Marwanon/Learning-Pick-to-Place-Objects-in-a-cluttered-scene-using-deep-reinforcement-learning)
+- **Author**: Marwan Qaid Mohammed
+- **Citation**: 
+  ```
+  Marwan Qaid Mohammed, Lee Chung Kwek and Shing Chyi Chua, 
+  "Learning Pick to Place Objects using Self-supervised Learning with Minimal Training Resources"
+  International Journal of Advanced Computer Science and Applications (IJACSA), 12(10), 2021.
+  ```
+- **사용된 파일**: `network.py`, `logger.py`, `DQNModels.py` (일부), `DQNTrainer.py` (일부), `utils.py` (일부)
+
+### 2. Visual Pushing Grasping
+- **Repository**: [andyzeng/visual-pushing-grasping](https://github.com/andyzeng/visual-pushing-grasping)
+- **Author**: Andy Zeng et al.
+
+---
+
+## ✨ 본 프로젝트의 독자적 기여 (My Original Contributions)
+
+| 기능 | 파일 | 설명 |
+|------|------|------|
+| **Double DQN** | `DQNTrainer.py` | Target Network 분리, Q값 과대추정 방지 |
+| **Dueling DQN** | `DQNModels.py` | Value + Advantage 스트림 분리 아키텍처 |
+| **IRB360 델타 로봇 통합** | `robot_zmq_irb360.py` | CoppeliaSim ZMQ API 기반 로봇 제어 (완전 새로 작성) |
+| **진공 컵 제어** | `robot_zmq_irb360.py` | 흡착/해제 시그널, 센서 기반 하강 |
+| **Curriculum Learning** | `main_irb360.py` | 단계적 탐색 영역 확장 전략 |
+| **바닥 감지** | `main_irb360.py` | 그리퍼 영역 내 바닥 선택 시 즉시 실패 및 음수 보상 |
+| **카메라 캘리브레이션** | `utils.py`, `test/` | Homography 기반 좌표 변환 |
+| **Heightmap 검증** | `utils.py` | 물체 위치와 heightmap 정확도 검증 |
+| **Orthographic 카메라** | `utils.py` | Ortho 카메라용 heightmap 생성 |
+| **동일 이미지 감지** | `main_irb360.py` | 물체가 로봇에 붙어있는 경우 감지 |
+
+---
 
 ## 📝 License
 

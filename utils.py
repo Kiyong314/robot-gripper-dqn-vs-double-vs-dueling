@@ -3,18 +3,36 @@
 """
 유틸리티 함수 모음
 
-원본: D:/1.github/23.Learning-Pick-to-Place-Objects-in-a-cluttered-scene-using-deep-reinforcement-learning-main/utils.py
+=============================================================================
+Original Code Attribution:
+    Repository: https://github.com/Marwanon/Learning-Pick-to-Place-Objects-in-a-cluttered-scene-using-deep-reinforcement-learning
+    Original Author: Marwan Qaid Mohammed
+    Paper: "Learning Pick to Place Objects using Self-supervised Learning with Minimal Training Resources"
+           International Journal of Advanced Computer Science and Applications (IJACSA), 12(10), 2021
+    
+    Based on: https://github.com/andyzeng/visual-pushing-grasping
+
+Modifications for this project (My Contributions):
+    ✨ Orthographic 카메라용 heightmap 생성 함수 (get_heightmap_ortho)
+    ✨ Homography 기반 카메라 캘리브레이션 로드/적용
+    ✨ 월드 좌표 ↔ heightmap 픽셀 좌표 변환 함수
+    ✨ Heightmap 정확도 검증 함수 (verify_heightmap_accuracy)
+    ✨ Python 3 호환성 수정 (정수 나눗셈, tobytes 등)
+    ✨ 한국어 주석 추가
+    
+This code is used for educational purposes as part of a graduate project.
+=============================================================================
 
 주요 함수:
-- get_heightmap(): RGB-D 이미지에서 heightmap 생성
-- get_pointcloud(): depth 이미지에서 3D 포인트 클라우드 생성
-- euler2rotm(): 오일러 각도 → 회전 행렬 변환
-- get_change_value(): depth 변화량 계산
-
-수정사항 (Python 3 호환):
-- Python 2 나눗셈 → Python 3 정수 나눗셈(//)
-- tostring() → tobytes()
-- NLLLoss2d → NLLLoss (deprecated)
+    - get_heightmap(): RGB-D 이미지에서 heightmap 생성 (Perspective 카메라용)
+    - get_heightmap_ortho(): Orthographic 카메라용 heightmap 생성
+    - get_pointcloud(): depth 이미지에서 3D 포인트 클라우드 생성
+    - euler2rotm(): 오일러 각도 → 회전 행렬 변환
+    - get_change_value(): depth 변화량 계산
+    - load_camera_calibration(): Homography 행렬 로드
+    - heightmap_pixel_to_world(): heightmap 픽셀 → 월드 좌표 변환
+    - world_to_heightmap_pixel(): 월드 좌표 → heightmap 픽셀 변환
+    - verify_heightmap_accuracy(): heightmap과 실제 물체 위치 검증
 """
 
 import struct

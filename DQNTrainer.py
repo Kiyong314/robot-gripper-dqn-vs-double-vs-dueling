@@ -1,3 +1,35 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+DQN 학습 트레이너 (Standard DQN + Double DQN + Dueling DQN 지원)
+
+=============================================================================
+Original Code Attribution:
+    Repository: https://github.com/Marwanon/Learning-Pick-to-Place-Objects-in-a-cluttered-scene-using-deep-reinforcement-learning
+    Original Author: Marwan Qaid Mohammed
+    Paper: "Learning Pick to Place Objects using Self-supervised Learning with Minimal Training Resources"
+           International Journal of Advanced Computer Science and Applications (IJACSA), 12(10), 2021
+    
+    Based on: https://github.com/andyzeng/visual-pushing-grasping
+
+Modifications for this project (My Contributions):
+    ✨ Double DQN 구현 (Q값 과대추정 방지)
+       - Van Hasselt et al., "Deep Reinforcement Learning with Double Q-learning", AAAI 2016
+       - Q_target = r + γ * Q_target(s', argmax_a Q_main(s', a'))
+    ✨ Target Network 관리 및 주기적 동기화
+    ✨ Target Network 출력 검증 로직
+    ✨ 균형 잡힌 Experience Replay 버퍼 (성공/실패 분리)
+    ✨ 바닥 선택 실패에 대한 음수 보상 (-0.5)
+    ✨ NaN 체크 및 안전장치
+    ✨ 한국어 주석 추가
+    
+This code is used for educational purposes as part of a graduate project.
+=============================================================================
+
+주요 클래스:
+    - DQNTrainer: DQN 학습 및 추론 관리
+"""
+
 import os
 import numpy as np
 import cv2
@@ -205,7 +237,7 @@ class DQNTrainer(object):
         self.change_detected_log = []
         
         # 균형 잡힌 Experience Replay를 위한 분리된 버퍼
-        # 성공/실패 샘플을 별도로 저장하여 3:1 비율로 샘플링
+        # 성공/실패 샘플을 별도로 저장하여 1:1 비율로 균형 샘플링
         self.success_buffer = []  # 성공 샘플의 iteration 인덱스 리스트
         self.failure_buffer = []  # 실패 샘플의 iteration 인덱스 리스트 (일반 실패 + 바닥 선택)
 
@@ -320,92 +352,25 @@ class DQNTrainer(object):
 
     # Compute forward pass through model to compute affordances/Q
     def forward(self, color_heightmap, depth_heightmap, is_volatile=False, specific_rotation=-1):
-
-        # Apply 2x scale to input heightmaps
-        color_heightmap_2x = ndimage.zoom(color_heightmap, zoom=[2,2,1], order=0)
-        depth_heightmap_2x = ndimage.zoom(depth_heightmap, zoom=[2,2], order=0)
-        assert(color_heightmap_2x.shape[0:2] == depth_heightmap_2x.shape[0:2])
-        
-        # Add extra padding (to handle rotations inside network)
-        diag_length = float(color_heightmap_2x.shape[0]) * np.sqrt(2)
-        diag_length = np.ceil(diag_length/32)*32
-        padding_width = int((diag_length - color_heightmap_2x.shape[0])/2)
-        color_heightmap_2x_r =  np.pad(color_heightmap_2x[:,:,0], padding_width, 'constant', constant_values=0)
-        color_heightmap_2x_r.shape = (color_heightmap_2x_r.shape[0], color_heightmap_2x_r.shape[1], 1)
-        color_heightmap_2x_g =  np.pad(color_heightmap_2x[:,:,1], padding_width, 'constant', constant_values=0)
-        color_heightmap_2x_g.shape = (color_heightmap_2x_g.shape[0], color_heightmap_2x_g.shape[1], 1)
-        color_heightmap_2x_b =  np.pad(color_heightmap_2x[:,:,2], padding_width, 'constant', constant_values=0)
-        color_heightmap_2x_b.shape = (color_heightmap_2x_b.shape[0], color_heightmap_2x_b.shape[1], 1)
-        color_heightmap_2x = np.concatenate((color_heightmap_2x_r, color_heightmap_2x_g, color_heightmap_2x_b), axis=2)
-        depth_heightmap_2x =  np.pad(depth_heightmap_2x, padding_width, 'constant', constant_values=0)
-        
-        # Pre-process color image (scale and normalize)
-        image_mean = [0.485, 0.456, 0.406]
-        image_std = [0.229, 0.224, 0.225]
-        input_color_image = color_heightmap_2x.astype(float)/255
-        for c in range(3):
-            input_color_image[:, :, c] = (input_color_image[:, :, c] - image_mean[c])/image_std[c]
-        # Pre-process depth image (normalize)
-        image_mean = 0.01
-        image_std = 0.03
-        depth_heightmap_2x.shape = (depth_heightmap_2x.shape[0], depth_heightmap_2x.shape[1], 1)
-        input_depth_image = (depth_heightmap_2x - image_mean) / image_std
-        
-        # Construct minibatch of size 1 (b,c,h,w)
-        input_color_image.shape = (input_color_image.shape[0], input_color_image.shape[1], input_color_image.shape[2], 1)
-        input_depth_image.shape = (input_depth_image.shape[0], input_depth_image.shape[1], input_depth_image.shape[2], 1)
-        input_color_data = torch.from_numpy(input_color_image.astype(np.float32)).permute(3,2,0,1)
-        input_depth_data = torch.from_numpy(input_depth_image.astype(np.float32)).permute(3,2,0,1)
-        # Pass input data through model
-        output_prob, state_feat = self.model.forward(input_color_data, input_depth_data,  is_volatile, specific_rotation)
-
-        if self.method == 'reinforcement':
-
-            # Return Q values (and remove extra padding)
-            for rotate_idx in range(len(output_prob)):
-                if rotate_idx == 0:
-                    grasp_predictions = output_prob[rotate_idx][0].cpu().data.numpy()[:,0,int(padding_width/2):int(color_heightmap_2x.shape[0]/2 - padding_width/2),int(padding_width/2):int(color_heightmap_2x.shape[0]/2 - padding_width/2)]
-
-                else:
-                    grasp_predictions = np.concatenate((grasp_predictions, output_prob[rotate_idx][0].cpu().data.numpy()[:,0,int(padding_width/2):int(color_heightmap_2x.shape[0]/2 - padding_width/2),int(padding_width/2):int(color_heightmap_2x.shape[0]/2 - padding_width/2)]), axis=0)
-
-        return grasp_predictions, state_feat
-
-    def forward_target(self, color_heightmap, depth_heightmap):
         """
-        Target network를 통한 forward pass (Double DQN용)
-        
-        Double DQN에서 Q값 평가에 사용됨.
-        Main network로 action 선택 후, Target network로 해당 action의 Q값 계산.
+        Forward pass - 패딩 없이 640×640 직접 입력 (num_rotations=1 최적화)
         
         Args:
-            color_heightmap: 컬러 heightmap (H, W, 3)
-            depth_heightmap: 깊이 heightmap (H, W)
-        
+            color_heightmap: 원본 컬러 heightmap (H, W, 3) - 보통 320×320
+            depth_heightmap: 원본 깊이 heightmap (H, W) - 보통 320×320
+            
         Returns:
-            grasp_predictions: Target network의 Q값 예측 (num_rotations, H, W)
-            state_feat: 상태 특징 (사용 안 함)
+            grasp_predictions: Q값 예측 (num_rotations, H, W) - 원본 크기 320×320
         """
-        if not self.double_dqn or self.target_model is None:
-            raise RuntimeError('[Double DQN] Target network not initialized')
+        original_height, original_width = color_heightmap.shape[:2]
         
-        # Apply 2x scale to input heightmaps
+        # Apply 2x scale to input heightmaps (320 → 640)
         color_heightmap_2x = ndimage.zoom(color_heightmap, zoom=[2, 2, 1], order=0)
         depth_heightmap_2x = ndimage.zoom(depth_heightmap, zoom=[2, 2], order=0)
         assert(color_heightmap_2x.shape[0:2] == depth_heightmap_2x.shape[0:2])
         
-        # Add extra padding (to handle rotations inside network)
-        diag_length = float(color_heightmap_2x.shape[0]) * np.sqrt(2)
-        diag_length = np.ceil(diag_length / 32) * 32
-        padding_width = int((diag_length - color_heightmap_2x.shape[0]) / 2)
-        color_heightmap_2x_r = np.pad(color_heightmap_2x[:, :, 0], padding_width, 'constant', constant_values=0)
-        color_heightmap_2x_r.shape = (color_heightmap_2x_r.shape[0], color_heightmap_2x_r.shape[1], 1)
-        color_heightmap_2x_g = np.pad(color_heightmap_2x[:, :, 1], padding_width, 'constant', constant_values=0)
-        color_heightmap_2x_g.shape = (color_heightmap_2x_g.shape[0], color_heightmap_2x_g.shape[1], 1)
-        color_heightmap_2x_b = np.pad(color_heightmap_2x[:, :, 2], padding_width, 'constant', constant_values=0)
-        color_heightmap_2x_b.shape = (color_heightmap_2x_b.shape[0], color_heightmap_2x_b.shape[1], 1)
-        color_heightmap_2x = np.concatenate((color_heightmap_2x_r, color_heightmap_2x_g, color_heightmap_2x_b), axis=2)
-        depth_heightmap_2x = np.pad(depth_heightmap_2x, padding_width, 'constant', constant_values=0)
+        # [패딩 제거] num_rotations=1이므로 회전용 패딩 불필요
+        # 640×640 그대로 모델에 입력
         
         # Pre-process color image (scale and normalize)
         image_mean = [0.485, 0.456, 0.406]
@@ -415,42 +380,88 @@ class DQNTrainer(object):
             input_color_image[:, :, c] = (input_color_image[:, :, c] - image_mean[c]) / image_std[c]
         
         # Pre-process depth image (normalize)
-        image_mean = 0.01
-        image_std = 0.03
-        depth_heightmap_2x.shape = (depth_heightmap_2x.shape[0], depth_heightmap_2x.shape[1], 1)
-        input_depth_image = (depth_heightmap_2x - image_mean) / image_std
+        depth_heightmap_2x = depth_heightmap_2x.reshape(depth_heightmap_2x.shape[0], depth_heightmap_2x.shape[1], 1)
+        input_depth_image = (depth_heightmap_2x - 0.01) / 0.03
         
         # Construct minibatch of size 1 (b,c,h,w)
-        input_color_image.shape = (input_color_image.shape[0], input_color_image.shape[1], input_color_image.shape[2], 1)
-        input_depth_image.shape = (input_depth_image.shape[0], input_depth_image.shape[1], input_depth_image.shape[2], 1)
+        input_color_image = input_color_image.reshape(input_color_image.shape[0], input_color_image.shape[1], input_color_image.shape[2], 1)
+        input_depth_image = input_depth_image.reshape(input_depth_image.shape[0], input_depth_image.shape[1], input_depth_image.shape[2], 1)
         input_color_data = torch.from_numpy(input_color_image.astype(np.float32)).permute(3, 2, 0, 1)
         input_depth_data = torch.from_numpy(input_depth_image.astype(np.float32)).permute(3, 2, 0, 1)
         
-        # Pass input data through TARGET model (not main model)
-        # 일시적으로 train 모드로 전환 (BatchNorm이 eval 모드에서 nan 발생 방지)
-        # eval 모드에서는 running statistics를 사용하는데, 초기 상태에서 제대로 설정되지 않을 수 있음
+        # Pass input data through model
+        output_prob, state_feat = self.model.forward(input_color_data, input_depth_data, is_volatile, specific_rotation)
+
+        if self.method == 'reinforcement':
+            # [패딩 제거 후] 출력을 원본 크기로 리사이즈 (640 → 320)
+            # output_prob[0][0]: [1, 1, 640, 640]
+            q_map_640 = output_prob[0][0].cpu().data.numpy()[0, 0]  # [640, 640]
+            
+            # 원본 크기로 리사이즈
+            grasp_predictions = cv2.resize(q_map_640, (original_width, original_height), 
+                                          interpolation=cv2.INTER_LINEAR)
+            grasp_predictions = grasp_predictions.reshape(1, original_height, original_width)  # [1, H, W]
+
+        return grasp_predictions, state_feat
+
+    def forward_target(self, color_heightmap, depth_heightmap):
+        """
+        Target network를 통한 forward pass (Double DQN용)
+        패딩 없이 640×640 직접 입력 (num_rotations=1 최적화)
+        
+        Args:
+            color_heightmap: 컬러 heightmap (H, W, 3) - 보통 320×320
+            depth_heightmap: 깊이 heightmap (H, W) - 보통 320×320
+        
+        Returns:
+            grasp_predictions: Target network의 Q값 예측 (1, H, W) - 원본 크기
+        """
+        if not self.double_dqn or self.target_model is None:
+            raise RuntimeError('[Double DQN] Target network not initialized')
+        
+        original_height, original_width = color_heightmap.shape[:2]
+        
+        # Apply 2x scale to input heightmaps (320 → 640)
+        color_heightmap_2x = ndimage.zoom(color_heightmap, zoom=[2, 2, 1], order=0)
+        depth_heightmap_2x = ndimage.zoom(depth_heightmap, zoom=[2, 2], order=0)
+        assert(color_heightmap_2x.shape[0:2] == depth_heightmap_2x.shape[0:2])
+        
+        # [패딩 제거] num_rotations=1이므로 회전용 패딩 불필요
+        
+        # Pre-process color image (scale and normalize)
+        image_mean = [0.485, 0.456, 0.406]
+        image_std = [0.229, 0.224, 0.225]
+        input_color_image = color_heightmap_2x.astype(float) / 255
+        for c in range(3):
+            input_color_image[:, :, c] = (input_color_image[:, :, c] - image_mean[c]) / image_std[c]
+        
+        # Pre-process depth image (normalize)
+        depth_heightmap_2x = depth_heightmap_2x.reshape(depth_heightmap_2x.shape[0], depth_heightmap_2x.shape[1], 1)
+        input_depth_image = (depth_heightmap_2x - 0.01) / 0.03
+        
+        # Construct minibatch of size 1 (b,c,h,w)
+        input_color_image = input_color_image.reshape(input_color_image.shape[0], input_color_image.shape[1], input_color_image.shape[2], 1)
+        input_depth_image = input_depth_image.reshape(input_depth_image.shape[0], input_depth_image.shape[1], input_depth_image.shape[2], 1)
+        input_color_data = torch.from_numpy(input_color_image.astype(np.float32)).permute(3, 2, 0, 1)
+        input_depth_data = torch.from_numpy(input_depth_image.astype(np.float32)).permute(3, 2, 0, 1)
+        
+        # Pass input data through TARGET model
         was_training = self.target_model.training
         self.target_model.train()  # BatchNorm이 현재 입력의 통계 사용
         
         with torch.no_grad():
             output_prob, state_feat = self.target_model.forward(input_color_data, input_depth_data, is_volatile=True)
         
-        # 원래 모드로 복원
         if not was_training:
             self.target_model.eval()
         
         if self.method == 'reinforcement':
-            # Return Q values (and remove extra padding)
-            for rotate_idx in range(len(output_prob)):
-                if rotate_idx == 0:
-                    grasp_predictions = output_prob[rotate_idx][0].cpu().data.numpy()[:, 0,
-                                        int(padding_width / 2):int(color_heightmap_2x.shape[0] / 2 - padding_width / 2),
-                                        int(padding_width / 2):int(color_heightmap_2x.shape[0] / 2 - padding_width / 2)]
-                else:
-                    grasp_predictions = np.concatenate((grasp_predictions,
-                                        output_prob[rotate_idx][0].cpu().data.numpy()[:, 0,
-                                        int(padding_width / 2):int(color_heightmap_2x.shape[0] / 2 - padding_width / 2),
-                                        int(padding_width / 2):int(color_heightmap_2x.shape[0] / 2 - padding_width / 2)]), axis=0)
+            # [패딩 제거 후] 출력을 원본 크기로 리사이즈 (640 → 320)
+            q_map_640 = output_prob[0][0].cpu().data.numpy()[0, 0]  # [640, 640]
+            
+            grasp_predictions = cv2.resize(q_map_640, (original_width, original_height),
+                                          interpolation=cv2.INTER_LINEAR)
+            grasp_predictions = grasp_predictions.reshape(1, original_height, original_width)  # [1, H, W]
         
         return grasp_predictions, state_feat
 

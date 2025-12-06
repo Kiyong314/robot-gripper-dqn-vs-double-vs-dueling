@@ -3,8 +3,31 @@
 """
 IRB360 델타 로봇 DQN 학습 메인 스크립트
 
-참고: D:\1.github\23.Learning-Pick-to-Place-Objects-in-a-cluttered-scene-using-deep-reinforcement-learning-main\main.py
-수정: IRB360 로봇 및 진공 컵에 맞게 조정
+=============================================================================
+Original Code Attribution:
+    Repository: https://github.com/Marwanon/Learning-Pick-to-Place-Objects-in-a-cluttered-scene-using-deep-reinforcement-learning
+    Original Author: Marwan Qaid Mohammed
+    Paper: "Learning Pick to Place Objects using Self-supervised Learning with Minimal Training Resources"
+           International Journal of Advanced Computer Science and Applications (IJACSA), 12(10), 2021
+    
+    Based on: https://github.com/andyzeng/visual-pushing-grasping
+
+Modifications for this project (My Contributions):
+    ✨ IRB360 델타 로봇 통합 (UR5 → IRB360)
+    ✨ 진공 컵 그리퍼 제어 (Parallel-jaw → Vacuum cup)
+    ✨ CoppeliaSim ZMQ Remote API 연동
+    ✨ Curriculum Learning 기반 Epsilon-greedy 탐색 전략
+       - 초기(0~500): 물체 위치에서만 탐색
+       - 중반(500~1000): 80% 물체 + 20% 전체 영역
+       - 후반(1000+): 전체 영역 탐색 (바닥 회피 학습)
+    ✨ 그리퍼 영역 내 바닥 감지 및 즉시 실패 처리
+    ✨ 동일 이미지 연속 감지 (로봇에 물체 붙음 감지)
+    ✨ Homography 기반 카메라 캘리브레이션 적용
+    ✨ Double DQN / Dueling DQN 명령줄 옵션 지원
+    ✨ 한국어 주석 추가
+    
+This code is used for educational purposes as part of a graduate project.
+=============================================================================
 """
 
 # OpenMP 중복 라이브러리 경고 해결
@@ -436,7 +459,7 @@ def main(args):
         if objects_too_few:
             print(f'[RESET] Too few objects remaining ({actual_object_count} <= 1)! Restarting scene...')
         
-        if np.sum(stuff_count) < empty_threshold or (is_sim and no_change_count[0] > 10) or objects_too_few:
+        if np.sum(stuff_count) < empty_threshold or (is_sim and no_change_count[0] > 10) :
             no_change_count = [0]
             if is_sim:
                 if not objects_too_few:
@@ -508,8 +531,8 @@ def main(args):
             if trainer.double_dqn and trainer.iteration % trainer.target_update_freq == 0:
                 trainer.update_target_network(color_heightmap, valid_depth_heightmap)
 
-            # Do sampling for experience replay (전체 버퍼 무작위 샘플링)
-            # 성공/실패 구분 없이 전체 버퍼에서 무작위로 4개 샘플링 (DQN 표준 방식)
+            # Do sampling for experience replay (균형 샘플링: 성공:실패 = 1:1)
+            # 성공 버퍼에서 2개 + 실패 버퍼에서 2개 = 총 4개 균형 샘플링
             if experience_replay and not is_testing:
                 samples_to_train = []  # 학습할 샘플 iteration 인덱스 리스트
                 
@@ -518,27 +541,41 @@ def main(args):
                 max_valid_idx = len(trainer.label_value_log) - 1
                 current_sample_idx = trainer.iteration - 1  # 방금 추가된 샘플
                 
-                # 전체 버퍼 통합 (성공 + 실패)
-                all_buffer = trainer.success_buffer + trainer.failure_buffer
+                # 유효한 성공/실패 버퍼 분리
+                valid_success = [idx for idx in trainer.success_buffer
+                                if idx <= max_valid_idx and idx != current_sample_idx]
+                valid_failure = [idx for idx in trainer.failure_buffer
+                                if idx <= max_valid_idx and idx != current_sample_idx]
                 
-                # 유효한 샘플만 필터링 (범위 내 + 현재 샘플 제외)
-                valid_buffer = [idx for idx in all_buffer 
-                               if idx <= max_valid_idx and idx != current_sample_idx]
+                # 최소 1개의 성공 샘플 보장 (가능하다면), 나머지는 실패 샘플
+                # 총 4개 샘플링 (1:3 비율 지향, 데이터 부족 시 유동적)
+                target_batch_size = 4
                 
-                # 전체 버퍼에서 무작위로 4개 샘플링
-                num_samples = min(4, len(valid_buffer))
-                if num_samples > 0:
-                    sampled_indices = np.random.choice(valid_buffer, size=num_samples, replace=False)
-                    for idx in sampled_indices:
-                        # 성공/실패 구분 (로그용)
-                        sample_type = 'success' if idx in trainer.success_buffer else 'failure'
-                        samples_to_train.append((sample_type, idx))
+                if len(valid_success) > 0:
+                    n_success = 1
+                    n_failure = target_batch_size - n_success
+                else:
+                    n_success = 0
+                    n_failure = target_batch_size
+                
+                # 실패 버퍼가 부족한 경우 조정
+                n_failure = min(n_failure, len(valid_failure))
+                
+                if n_success > 0:
+                    success_samples = np.random.choice(valid_success, size=n_success, replace=False)
+                    for idx in success_samples:
+                        samples_to_train.append(('success', idx))
+                if n_failure > 0:
+                    failure_samples = np.random.choice(valid_failure, size=n_failure, replace=False)
+                    for idx in failure_samples:
+                        samples_to_train.append(('failure', idx))
                 
                 # 샘플링 결과 로그
                 success_count = sum(1 for s in samples_to_train if s[0] == 'success')
                 failure_count = sum(1 for s in samples_to_train if s[0] == 'failure')
-                print(f'[REPLAY] Random sampling: {success_count} success, {failure_count} failure (total buffer={len(valid_buffer)})')
-                print(f'[REPLAY] Buffer composition: success={len(trainer.success_buffer)}, failure={len(trainer.failure_buffer)}, max_idx={max_valid_idx}')
+                total_valid = len(valid_success) + len(valid_failure)
+                print(f'[REPLAY] Sampling: {success_count} success, {failure_count} failure (valid={total_valid})')
+                print(f'[REPLAY] Buffer: success={len(valid_success)}/{len(trainer.success_buffer)}, failure={len(valid_failure)}/{len(trainer.failure_buffer)}')
                 
                 # 샘플링된 데이터로 학습
                 for sample_type, sample_iteration in samples_to_train:
@@ -647,7 +684,7 @@ if __name__ == '__main__':
     parser.add_argument('--double_dqn', dest='double_dqn', action='store_true', default=False,                            help='use Double DQN for more stable learning (prevents Q-value overestimation)')
     parser.add_argument('--target_update_freq', dest='target_update_freq', type=int, action='store', default=100,         help='frequency of target network update for Double DQN (iterations)')
     parser.add_argument('--dueling_dqn', dest='dueling_dqn', action='store_true', default=False,                          help='use Dueling DQN architecture (Value + Advantage streams)')
-    parser.add_argument('--gripper_diameter', dest='gripper_diameter', type=float, action='store', default=0.015,       help='gripper diameter in meters for floor check (default: 0.030m = 30mm)')
+    parser.add_argument('--gripper_diameter', dest='gripper_diameter', type=float, action='store', default=0.005,       help='gripper diameter in meters for floor check (default: 0.030m = 30mm)')
 
     # -------------- Testing options --------------
     parser.add_argument('--is_testing', dest='is_testing', action='store_true', default=False)

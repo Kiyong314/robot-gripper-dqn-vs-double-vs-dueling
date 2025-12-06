@@ -1,17 +1,30 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
-CoppeliaSim 4.10 ZMQ Remote API를 사용하는 IRB360 델타 로봇 클래스
+IRB360 델타 로봇 제어 클래스 (CoppeliaSim ZMQ Remote API)
 
-IRB360 델타 로봇 + BaxterVacuumCup 진공 컵 제어
+=============================================================================
+Original Work - Entirely Written for This Project
+
+Author: Graduate Student (이 프로젝트를 위해 완전히 새로 작성됨)
+
+This file is NOT based on any external repository.
+It was developed from scratch for IRB360 delta robot control.
+=============================================================================
 
 주요 특징:
-- IK 모드로 직접 XYZ 좌표 제어 (로봇 상대 좌표)
-- 진공 컵 신호로 물체 흡착/해제
-- Lua moveToConfig 함수 호출 또는 직접 조인트 제어
-- 월드 좌표 ↔ 로봇 상대 좌표 변환
+    - CoppeliaSim 4.10 ZMQ Remote API 기반 통신
+    - IRB360 델타 로봇 IK 제어
+    - BaxterVacuumCup 진공 컵 제어 (흡착/해제)
+    - 센서 기반 하강 (proximity sensor 활용)
+    - 월드 좌표 ↔ 로봇 좌표 변환
+    - 물체 동적 생성 및 관리
+    - 시뮬레이션 상태 모니터링
 
 좌표 시스템:
-- Place 위치: x=0.2, y=-0.5, z=0.3 (월드 좌표, 컨베이어 위치)
-- Pick 높이: z=0.3 (월드 좌표)
+    - Pick 영역: Plane 위치 (-0.5, 0, 0.001) 기준
+    - Place 영역: 별도 지정 가능
+    - Home 위치: (0, 0, 0.5) - 카메라 시야 밖
 """
 
 import time

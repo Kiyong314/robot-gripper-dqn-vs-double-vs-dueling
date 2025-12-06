@@ -1,3 +1,31 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+학습 데이터 로깅 및 저장 모듈
+
+=============================================================================
+Original Code Attribution:
+    Repository: https://github.com/Marwanon/Learning-Pick-to-Place-Objects-in-a-cluttered-scene-using-deep-reinforcement-learning
+    Original Author: Marwan Qaid Mohammed
+    Paper: "Learning Pick to Place Objects using Self-supervised Learning with Minimal Training Resources"
+           International Journal of Advanced Computer Science and Applications (IJACSA), 12(10), 2021
+    
+    Based on: https://github.com/andyzeng/visual-pushing-grasping
+
+Modifications for this project:
+    - Python 3 호환성 수정
+    - 한국어 주석 추가
+    
+This code is used for educational purposes as part of a graduate project.
+=============================================================================
+
+주요 기능:
+    - 학습 이미지 저장 (color, depth, heightmap)
+    - 모델 스냅샷 저장
+    - 학습 로그 저장 (reward, label, action 등)
+    - 시각화 이미지 저장
+"""
+
 import time
 import datetime
 import os

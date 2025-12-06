@@ -28,3 +28,4 @@ coppeliasim-zmqremoteapi-client>=1.0.0
 pyzmq>=22.0.0
 cbor2>=5.4.0
 
+

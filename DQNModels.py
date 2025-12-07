@@ -157,12 +157,14 @@ class DQN(nn.Module):
             with torch.no_grad():
                 interm_feat = self.feature_tunk(input_color_data, input_depth_data)
                 grasp_prediction = self._compute_grasp_prediction(interm_feat)
-                output_prob = [[F.interpolate(grasp_prediction, scale_factor=16, mode='bilinear', align_corners=True)]]
+                # 640 입력 → DenseNet (stride=32) → 20x20 feature map → 640 출력
+                output_prob = [[F.interpolate(grasp_prediction, scale_factor=32, mode='bilinear', align_corners=True)]]
             return output_prob, interm_feat
         else:
             self.interm_feat = self.feature_tunk(input_color_data, input_depth_data)
             grasp_prediction = self._compute_grasp_prediction(self.interm_feat)
-            self.output_prob = [[F.interpolate(grasp_prediction, scale_factor=16, mode='bilinear', align_corners=True)]]
+            # 640 입력 → DenseNet (stride=32) → 20x20 feature map → 640 출력
+            self.output_prob = [[F.interpolate(grasp_prediction, scale_factor=32, mode='bilinear', align_corners=True)]]
             return self.output_prob, self.interm_feat
         
     

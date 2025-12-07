@@ -373,7 +373,7 @@ class DQNTrainer(object):
     # Compute forward pass through model to compute affordances/Q
     def forward(self, color_heightmap, depth_heightmap, is_volatile=False, specific_rotation=-1):
         """
-        Forward pass - 패딩 없이 640×640 직접 입력 (num_rotations=1 최적화)
+        Forward pass - 640×640 zero-padding 방식 (경계 학습용)
         
         Args:
             color_heightmap: 원본 컬러 heightmap (H, W, 3) - 보통 320×320
@@ -384,24 +384,23 @@ class DQNTrainer(object):
         """
         original_height, original_width = color_heightmap.shape[:2]
         
-        # Apply 2x scale to input heightmaps (320 → 640)
-        color_heightmap_2x = ndimage.zoom(color_heightmap, zoom=[2, 2, 1], order=0)
-        depth_heightmap_2x = ndimage.zoom(depth_heightmap, zoom=[2, 2], order=0)
-        assert(color_heightmap_2x.shape[0:2] == depth_heightmap_2x.shape[0:2])
-        
-        # [패딩 제거] num_rotations=1이므로 회전용 패딩 불필요
-        # 640×640 그대로 모델에 입력
+        # Apply zero-padding to 640x640 (중앙 배치)
+        padding_width = 160
+        color_heightmap_pad = np.zeros((640, 640, 3), dtype=np.float32)
+        depth_heightmap_pad = np.zeros((640, 640), dtype=np.float32)
+        color_heightmap_pad[padding_width:padding_width+320, padding_width:padding_width+320, :] = color_heightmap
+        depth_heightmap_pad[padding_width:padding_width+320, padding_width:padding_width+320] = depth_heightmap
         
         # Pre-process color image (scale and normalize)
         image_mean = [0.485, 0.456, 0.406]
         image_std = [0.229, 0.224, 0.225]
-        input_color_image = color_heightmap_2x.astype(float) / 255
+        input_color_image = color_heightmap_pad.astype(float) / 255
         for c in range(3):
             input_color_image[:, :, c] = (input_color_image[:, :, c] - image_mean[c]) / image_std[c]
         
         # Pre-process depth image (normalize)
-        depth_heightmap_2x = depth_heightmap_2x.reshape(depth_heightmap_2x.shape[0], depth_heightmap_2x.shape[1], 1)
-        input_depth_image = (depth_heightmap_2x - 0.01) / 0.03
+        depth_heightmap_pad = depth_heightmap_pad.reshape(depth_heightmap_pad.shape[0], depth_heightmap_pad.shape[1], 1)
+        input_depth_image = (depth_heightmap_pad - 0.01) / 0.03
         
         # Construct minibatch of size 1 (b,c,h,w)
         input_color_image = input_color_image.reshape(input_color_image.shape[0], input_color_image.shape[1], input_color_image.shape[2], 1)
@@ -413,10 +412,10 @@ class DQNTrainer(object):
         output_prob, state_feat = self.model.forward(input_color_data, input_depth_data, is_volatile, specific_rotation)
 
         if self.method == 'reinforcement':
-            # [패딩 제거 후] 출력을 원본 크기로 리사이즈 (640 → 320)
-            # output_prob[0][0]: [1, 1, 640, 640]
-            # 변경 후: 320 출력을 그대로 사용 (리사이즈 불필요!)
-            grasp_predictions = output_prob[0][0].cpu().data.numpy()[0, 0]
+            # 모델 출력: [1, 1, 640, 640]
+            # 중앙 320x320만 추출 (160:480, 160:480)
+            grasp_predictions_full = output_prob[0][0].cpu().data.numpy()[0, 0]  # [640, 640]
+            grasp_predictions = grasp_predictions_full[160:480, 160:480]  # [320, 320]
             grasp_predictions = grasp_predictions.reshape(1, 320, 320)
 
         return grasp_predictions, state_feat
@@ -424,7 +423,7 @@ class DQNTrainer(object):
     def forward_target(self, color_heightmap, depth_heightmap):
         """
         Target network를 통한 forward pass (Double DQN용)
-        패딩 없이 640×640 직접 입력 (num_rotations=1 최적화)
+        640×640 zero-padding 방식 (경계 학습용)
         
         Args:
             color_heightmap: 컬러 heightmap (H, W, 3) - 보통 320×320
@@ -438,23 +437,23 @@ class DQNTrainer(object):
         
         original_height, original_width = color_heightmap.shape[:2]
         
-        # Apply 2x scale to input heightmaps (320 → 640)
-        color_heightmap_2x = ndimage.zoom(color_heightmap, zoom=[2, 2, 1], order=0)
-        depth_heightmap_2x = ndimage.zoom(depth_heightmap, zoom=[2, 2], order=0)
-        assert(color_heightmap_2x.shape[0:2] == depth_heightmap_2x.shape[0:2])
-        
-        # [패딩 제거] num_rotations=1이므로 회전용 패딩 불필요
+        # Apply zero-padding to 640x640 (중앙 배치)
+        padding_width = 160
+        color_heightmap_pad = np.zeros((640, 640, 3), dtype=np.float32)
+        depth_heightmap_pad = np.zeros((640, 640), dtype=np.float32)
+        color_heightmap_pad[padding_width:padding_width+320, padding_width:padding_width+320, :] = color_heightmap
+        depth_heightmap_pad[padding_width:padding_width+320, padding_width:padding_width+320] = depth_heightmap
         
         # Pre-process color image (scale and normalize)
         image_mean = [0.485, 0.456, 0.406]
         image_std = [0.229, 0.224, 0.225]
-        input_color_image = color_heightmap_2x.astype(float) / 255
+        input_color_image = color_heightmap_pad.astype(float) / 255
         for c in range(3):
             input_color_image[:, :, c] = (input_color_image[:, :, c] - image_mean[c]) / image_std[c]
         
         # Pre-process depth image (normalize)
-        depth_heightmap_2x = depth_heightmap_2x.reshape(depth_heightmap_2x.shape[0], depth_heightmap_2x.shape[1], 1)
-        input_depth_image = (depth_heightmap_2x - 0.01) / 0.03
+        depth_heightmap_pad = depth_heightmap_pad.reshape(depth_heightmap_pad.shape[0], depth_heightmap_pad.shape[1], 1)
+        input_depth_image = (depth_heightmap_pad - 0.01) / 0.03
         
         # Construct minibatch of size 1 (b,c,h,w)
         input_color_image = input_color_image.reshape(input_color_image.shape[0], input_color_image.shape[1], input_color_image.shape[2], 1)
@@ -473,12 +472,11 @@ class DQNTrainer(object):
             self.target_model.eval()
         
         if self.method == 'reinforcement':
-            # [패딩 제거 후] 출력을 원본 크기로 리사이즈 (640 → 320)
-            q_map_640 = output_prob[0][0].cpu().data.numpy()[0, 0]  # [640, 640]
-            
-            grasp_predictions = cv2.resize(q_map_640, (original_width, original_height),
-                                          interpolation=cv2.INTER_LINEAR)
-            grasp_predictions = grasp_predictions.reshape(1, original_height, original_width)  # [1, H, W]
+            # 모델 출력: [1, 1, 640, 640]
+            # 중앙 320x320만 추출 (160:480, 160:480)
+            grasp_predictions_full = output_prob[0][0].cpu().data.numpy()[0, 0]  # [640, 640]
+            grasp_predictions = grasp_predictions_full[160:480, 160:480]  # [320, 320]
+            grasp_predictions = grasp_predictions.reshape(1, 320, 320)
         
         return grasp_predictions, state_feat
 
@@ -579,34 +577,38 @@ class DQNTrainer(object):
             # Do forward pass first to get actual output size
             if primitive_action == 'grasp':
                 grasp_predictions, state_feat = self.forward(color_heightmap, depth_heightmap, is_volatile=False, specific_rotation=best_pix_ind[0])
-                # 동적으로 output 크기 가져오기 (num_rotations=1일 때 대응)
+                # 모델 내부 output은 640x640이지만, forward에서 크롭하여 320x320 반환
+                # backprop에서는 모델 내부 640x640 출력에 대해 loss 계산
                 output_shape = self.model.output_prob[0][0].shape
-                output_size = (int(output_shape[-2]), int(output_shape[-1]))  # (H, W)를 정수 튜플로 변환
-                print(f'[DEBUG] output_shape: {output_shape}, output_size: {output_size}')
-                print(f'[DEBUG] input (heightmap) shape: {color_heightmap.shape}')
+                output_size = (int(output_shape[-2]), int(output_shape[-1]))  # (640, 640)
+                print(f'[DEBUG] Model output size: {output_size}')
+                print(f'[DEBUG] Input heightmap size: {color_heightmap.shape}')
             else:
                 # place action일 경우 (현재 프로젝트에서는 사용 안 함)
-                output_size = (320, 320)
+                output_size = (640, 640)
             
-            # Compute labels with dynamic size
-            label = np.zeros((1, output_size[0], output_size[1]))
-            # Input size = output_size - 2*padding
-            input_size = (color_heightmap.shape[0], color_heightmap.shape[1])
-            padding = (output_size[0] - input_size[0]) // 2
+            # ============================================================
+            # 640x640 패딩 방식: 320 좌표 → 640 좌표 매핑
+            # ============================================================
+            padding = 160
             
-            print(f'[DEBUG] label shape: {label.shape}, input_size: {input_size}, padding: {padding}')
+            # 빈 레이블 생성 (모델 내부 출력 크기: 640x640)
+            label = np.zeros((1, 640, 640))
+            label_weights = np.zeros((1, 640, 640))
             
-            action_area = np.zeros(input_size)
-            action_area[best_pix_ind[1]][best_pix_ind[2]] = 1
-            tmp_label = np.zeros(input_size)
-            tmp_label[action_area > 0] = label_value
-            label[0, padding:(output_size[0]-padding), padding:(output_size[1]-padding)] = tmp_label
+            # 입력 좌표 (320 기준)
+            y_in, x_in = best_pix_ind[1], best_pix_ind[2]
             
-            # Compute label mask
-            label_weights = np.zeros(label.shape)
-            tmp_label_weights = np.zeros(input_size)
-            tmp_label_weights[action_area > 0] = 1
-            label_weights[0, padding:(output_size[0]-padding), padding:(output_size[1]-padding)] = tmp_label_weights
+            # 640 좌표로 변환 (패딩 오프셋 추가)
+            y_out = y_in + padding
+            x_out = x_in + padding
+            
+            # 경계 체크
+            if 0 <= y_out < 640 and 0 <= x_out < 640:
+                label[0, y_out, x_out] = label_value
+                label_weights[0, y_out, x_out] = 1.0
+            
+            print(f'[BACKPROP] 320 coord ({y_in}, {x_in}) -> 640 coord ({y_out}, {x_out}), label={label_value}')
             
             # Compute loss and backward pass
             self.optimizer.zero_grad()
@@ -614,9 +616,9 @@ class DQNTrainer(object):
             if primitive_action == 'grasp':
                 
                 if self.use_cuda:
-                    grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, output_size[0], output_size[1]), Variable(torch.from_numpy(label).float().cuda())) * Variable(torch.from_numpy(label_weights).float().cuda(),requires_grad=False)
+                    grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, 640, 640), Variable(torch.from_numpy(label).float().cuda())) * Variable(torch.from_numpy(label_weights).float().cuda(),requires_grad=False)
                 else:
-                    grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, output_size[0], output_size[1]), Variable(torch.from_numpy(label).float())) * Variable(torch.from_numpy(label_weights).float(),requires_grad=False)
+                    grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, 640, 640), Variable(torch.from_numpy(label).float())) * Variable(torch.from_numpy(label_weights).float(),requires_grad=False)
                 grasp_loss = grasp_loss.sum()
                 grasp_loss.backward()
                 loss_value = grasp_loss.cpu().data.numpy()
@@ -631,9 +633,9 @@ class DQNTrainer(object):
                     grasp_predictions, state_feat = self.forward(color_heightmap, depth_heightmap, is_volatile=False, specific_rotation=opposite_rotate_idx)
 
                     if self.use_cuda:
-                        grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, output_size[0], output_size[1]), Variable(torch.from_numpy(label).float().cuda())) * Variable(torch.from_numpy(label_weights).float().cuda(),requires_grad=False)
+                        grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, 640, 640), Variable(torch.from_numpy(label).float().cuda())) * Variable(torch.from_numpy(label_weights).float().cuda(),requires_grad=False)
                     else:
-                        grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, output_size[0], output_size[1]), Variable(torch.from_numpy(label).float())) * Variable(torch.from_numpy(label_weights).float(),requires_grad=False)
+                        grasp_loss = self.criterion(self.model.output_prob[0][0].view(1, 640, 640), Variable(torch.from_numpy(label).float())) * Variable(torch.from_numpy(label_weights).float(),requires_grad=False)
 
                     grasp_loss = grasp_loss.sum()
                     grasp_loss.backward()

@@ -254,6 +254,7 @@ class DQNTrainer(object):
         self.place_success_log = []
         self.change_detected_log = []
         self.epsilon_log = []  # [epsilon, is_random] - Epsilon-greedy 탐색 기록
+        self.object_count_log = []  # [object_count] - 각 iteration의 물체 개수
         
         # 균형 잡힌 Experience Replay를 위한 분리된 버퍼
         # 성공/실패 샘플을 별도로 저장하여 1:1 비율로 균형 샘플링
@@ -295,7 +296,8 @@ class DQNTrainer(object):
             'grasp-success.log.txt': ('grasp_success_log', 1),          # [success]
             'place-success.log.txt': ('place_success_log', 1),          # [success]
             'change-detected.log.txt': ('change_detected_log', 1),      # [detected]
-            'epsilon.log.txt': ('epsilon_log', 2)                       # [epsilon, is_random]
+            'epsilon.log.txt': ('epsilon_log', 2),                      # [epsilon, is_random]
+            'object-count.log.txt': ('object_count_log', 1)             # [object_count]
         }
         for filename, (attr_name, expected_cols) in log_file_mapping.items():
             filepath = os.path.join(transitions_directory, filename)

@@ -124,7 +124,13 @@ def main(args):
     load_snapshot = args.load_snapshot # Load pre-trained snapshot of model?
     snapshot_file = os.path.abspath(args.snapshot_file)  if load_snapshot else None
     continue_logging = args.continue_logging # Continue logging from previous session
-    logging_directory = os.path.abspath(args.logging_directory) if continue_logging else os.path.abspath('logs')
+    # logging_directory는 continue_logging 또는 명시적으로 지정된 경우 사용
+    if args.logging_directory:
+        logging_directory = os.path.abspath(args.logging_directory)
+    elif continue_logging:
+        logging_directory = os.path.abspath(args.logging_directory) if args.logging_directory else os.path.abspath('logs')
+    else:
+        logging_directory = os.path.abspath('logs')
     save_visualizations = args.save_visualizations # Save visualizations of FCN predictions? Takes 0.6s per training step if set to True
 
 
@@ -161,6 +167,12 @@ def main(args):
     # 동일 이미지 감지를 위한 변수 (물체가 로봇에 붙어있는 경우 감지)
     same_image_count = [0]  # 동일 이미지 연속 카운트
     prev_color_heightmap_for_stuck = [None]  # 이전 이미지 저장
+
+    # [추가] 테스트 모드용 반복 실패 감지
+    if is_testing:
+        last_failed_position = None  # 마지막 실패 위치 (y, x)
+        consecutive_failures_at_same_pos = 0  # 같은 위치 연속 실패 카운트
+        position_tolerance = 10  # 같은 위치 판정 기준 (픽셀)
 
     # Quick hack for nonlocal memory between threads in Python 2
     nonlocal_variables = {'executing_action' : False,
@@ -205,7 +217,7 @@ def main(args):
                 nonlocal_variables['primitive_action'] = 'grasp'
                 
                 #Get pixel location and rotation with highest affordance prediction from heuristic algorithms (rotation, y, x)
-                # Epsilon-greedy 탐색 정책 적용 (논문 기준)
+                # Epsilon-greedy 탐색 정책 적용 
                 if nonlocal_variables['primitive_action'] == 'grasp':
                     # 현재 epsilon 계산 (선형 감소: epsilon_start → epsilon_end)
                     current_epsilon = max(epsilon_end, epsilon_start - (epsilon_start - epsilon_end) * trainer.iteration / epsilon_decay_steps)
@@ -372,6 +384,11 @@ def main(args):
     while True:
         print('\n%s iteration: %d' % ('Testing' if is_testing else 'Training', trainer.iteration))
         iteration_time_0 = time.time()
+        
+        # [테스트 모드] iteration 기반 종료 체크
+        if is_testing and trainer.iteration >= max_test_trials:
+            print(f'[TEST] Reached max test trials ({max_test_trials} iterations). Exiting...')
+            break
 
         # Make sure simulation is still stable (if not, reset simulation)
         if is_sim: robot.check_sim()
@@ -394,6 +411,14 @@ def main(args):
         valid_depth_heightmap = depth_heightmap.copy()
         valid_depth_heightmap[np.isnan(valid_depth_heightmap)] = 0
 
+        # [추가] 테스트 모드: 현재 물체 개수 로깅
+        if is_testing and is_sim:
+            current_obj_positions = robot.get_obj_positions()
+            current_obj_count = len(current_obj_positions) if current_obj_positions else 0
+            trainer.object_count_log.append([current_obj_count])
+            logger.write_to_log('object-count', trainer.object_count_log)
+            print(f'[TEST] Current object count: {current_obj_count}')
+
         # Heightmap debug output
         print(f'[HEIGHTMAP] depth_heightmap range: min={np.nanmin(depth_heightmap):.4f}, max={np.nanmax(depth_heightmap):.4f}')
         print(f'[HEIGHTMAP] non-zero pixels (>0.01): {np.sum(valid_depth_heightmap > 0.01)}')
@@ -414,11 +439,7 @@ def main(args):
             
             if not verification_passed:
                 print('[VERIFICATION] FAILED - Press Enter to continue or Ctrl+C to exit...')
-                try:
-                    input()
-                except KeyboardInterrupt:
-                    print('\n[VERIFICATION] User aborted.')
-                    exit(1)
+                
             else:
                 print('[VERIFICATION] PASSED - Continuing training...')
         
@@ -457,6 +478,67 @@ def main(args):
         if is_sim and is_testing:
             empty_threshold = 10
         
+        # [추가] 테스트 모드: 같은 위치 반복 실패 감지
+        # 첫 iteration은 스킵 (prev_primitive_action이 아직 정의되지 않음)
+        if is_testing and 'prev_primitive_action' in locals() and prev_primitive_action is not None:
+            current_grasp_success = nonlocal_variables.get('grasp_success', 1)
+            
+            # 실패 케이스: False(일반 실패) 또는 -1(바닥 선택)
+            if current_grasp_success in [False, -1, 0]:
+                current_position = (prev_best_pix_ind[1], prev_best_pix_ind[2])  # (y, x)
+                
+                # 이전 실패 위치와 비교
+                if last_failed_position is not None:
+                    distance = np.sqrt(
+                        (current_position[0] - last_failed_position[0])**2 + 
+                        (current_position[1] - last_failed_position[1])**2
+                    )
+                    
+                    if distance <= position_tolerance:
+                        consecutive_failures_at_same_pos += 1
+                        print(f'[TEST] Consecutive failure at similar position: {consecutive_failures_at_same_pos} '
+                              f'(distance={distance:.1f}px from last failure)')
+                        
+                        # 2회 연속 실패 → 씬 재시작
+                        if consecutive_failures_at_same_pos >= 2:
+                            print(f'[TEST] Detected {consecutive_failures_at_same_pos} consecutive failures '
+                                  f'at position ({current_position[0]}, {current_position[1]})')
+                            print('[TEST] Restarting scene to avoid infinite loop...')
+                            
+                            # 이 실패를 1개로 카운트 (이미 grasp_success_log에 기록되어 있음)
+                            # 별도 기록 불필요 (이미 prev_grasp_success가 로그에 저장됨)
+                            
+                            robot.restart_sim()
+                            robot.add_objects()
+                            trainer.model.load_state_dict(torch.load(snapshot_file))
+                            
+                            # 카운터 초기화
+                            consecutive_failures_at_same_pos = 0
+                            last_failed_position = None
+                            no_change_count = [0]
+                            same_image_count = [0]
+                            prev_color_heightmap_for_stuck = [None]
+                            
+                            trainer.clearance_log.append([trainer.iteration])
+                            logger.write_to_log('clearance', trainer.clearance_log)
+                            
+                            if len(trainer.clearance_log) >= max_test_trials:
+                                exit_called = True
+                            
+                            continue  # 씬 재시작 후 다음 iteration으로
+                    else:
+                        # 다른 위치 실패 → 카운터 리셋
+                        consecutive_failures_at_same_pos = 1
+                else:
+                    # 첫 실패
+                    consecutive_failures_at_same_pos = 1
+                
+                last_failed_position = current_position
+            else:
+                # 성공 시 카운터 초기화
+                consecutive_failures_at_same_pos = 0
+                last_failed_position = None
+        
         # 실제 물체 개수 체크 (1개 이하면 씬 재시작)
         actual_object_count = len(robot.object_handles) if hasattr(robot, 'object_handles') else 0
         objects_too_few = is_sim and actual_object_count <= 1
@@ -479,7 +561,10 @@ def main(args):
 
             trainer.clearance_log.append([trainer.iteration])
             logger.write_to_log('clearance', trainer.clearance_log)
+            
+            # 테스트 모드: 씬 클리어 횟수로 종료 판단
             if is_testing and len(trainer.clearance_log) >= max_test_trials:
+                print(f'[TEST] Reached max test trials ({max_test_trials} clearances). Exiting...')
                 exit_called = True # Exit after training thread (backprop and saving labels)
             continue
 
@@ -526,15 +611,16 @@ def main(args):
                 print(f'[TRAINING] Using failure (grasp_success={prev_grasp_success}) for learning')
                 print(f'[TRAINING] Reward: {prev_reward_value:.4f}, Label: {label_value:.4f}')
 
-            # Backpropagate (nan label이면 건너뜀 - 네트워크 손상 방지)
-            if np.isnan(label_value):
-                print('[TRAINING] Warning: label_value is nan, skipping backprop to prevent network corruption')
-            else:
-                trainer.backprop(prev_color_heightmap, prev_valid_depth_heightmap, prev_primitive_action, prev_best_pix_ind, label_value)
-            
-            # Double DQN: Target network 주기적 업데이트 (현재 heightmap으로 출력 검증)
-            if trainer.double_dqn and trainer.iteration % trainer.target_update_freq == 0:
-                trainer.update_target_network(color_heightmap, valid_depth_heightmap)
+            # Backpropagate (테스트 모드가 아닐 때만)
+            if not is_testing:
+                if np.isnan(label_value):
+                    print('[TRAINING] Warning: label_value is nan, skipping backprop to prevent network corruption')
+                else:
+                    trainer.backprop(prev_color_heightmap, prev_valid_depth_heightmap, prev_primitive_action, prev_best_pix_ind, label_value)
+                
+                # Double DQN: Target network 주기적 업데이트 (현재 heightmap으로 출력 검증)
+                if trainer.double_dqn and trainer.iteration % trainer.target_update_freq == 0:
+                    trainer.update_target_network(color_heightmap, valid_depth_heightmap)
 
             # Do sampling for experience replay (균형 샘플링: 성공:실패 = 1:1)
             # 성공 버퍼에서 2개 + 실패 버퍼에서 2개 = 총 4개 균형 샘플링

@@ -136,84 +136,56 @@ class DQN(nn.Module):
 
     def forward(self, input_color_data, input_depth_data, is_volatile=False, specific_rotation=-1):
         """
-        Forward pass (회전 연산 제거 - num_rotations=1 최적화)
+        Forward pass (num_rotations=1 고정, 회전 연산 완전 제거)
         
         Args:
             input_color_data: 컬러 이미지 텐서 [B, 3, H, W]
             input_depth_data: 깊이 이미지 텐서 [B, 1, H, W]
             is_volatile: 추론 모드 (gradient 계산 안 함)
-            specific_rotation: 사용 안 함 (호환성 유지용)
+            specific_rotation: 사용 안 함 (호환성 유지용, 무시됨)
         
         Returns:
-            output_prob: Q값 예측 리스트
-            interm_feat: 중간 특징
+            output_prob: Q값 예측 리스트 [[tensor]]
+            interm_feat: 중간 특징 (B, 1024, H, W)
         """
+        # CUDA 텐서 이동 (필요시)
+        if self.use_cuda:
+            input_color_data = input_color_data.cuda()
+            input_depth_data = input_depth_data.cuda()
+        
         if is_volatile:
             with torch.no_grad():
-                output_prob = []
-
-                # Apply rotations to images
-                for rotate_idx in range(self.num_rotations):
-                    rotate_theta = np.radians(rotate_idx * (360 / self.num_rotations))
-                    # Compute intermediate features
-                    interm_feat = self.layers_forward(rotate_theta, input_color_data, input_depth_data)
-                    # Forward pass through branches (Standard or Dueling)
-                    grasp_prediction = self._compute_grasp_prediction(interm_feat)
-                    # Compute sample grid for rotation AFTER branches
-                    affine_mat_after = np.asarray([[np.cos(rotate_theta), np.sin(rotate_theta), 0], [-np.sin(rotate_theta), np.cos(rotate_theta), 0]])
-                    affine_mat_after.shape = (2, 3, 1)
-                    affine_mat_after = torch.from_numpy(affine_mat_after).permute(2, 0, 1).float()
-                    if self.use_cuda:
-                        flow_grid_after = F.affine_grid(Variable(affine_mat_after, requires_grad=False).cuda(), grasp_prediction.data.size())
-                    else:
-                        flow_grid_after = F.affine_grid(Variable(affine_mat_after, requires_grad=False), grasp_prediction.data.size())
-                    # Forward pass through branches, undo rotation on output predictions, upsample results
-                    output_prob.append([F.interpolate(F.grid_sample(grasp_prediction, flow_grid_after), scale_factor=16, mode='bilinear', align_corners=True)])
+                interm_feat = self.feature_tunk(input_color_data, input_depth_data)
+                grasp_prediction = self._compute_grasp_prediction(interm_feat)
+                output_prob = [[F.interpolate(grasp_prediction, scale_factor=16, mode='bilinear', align_corners=True)]]
             return output_prob, interm_feat
-
         else:
-            self.output_prob = []
-            # Apply rotations to intermediate features
-            rotate_idx = specific_rotation
-            rotate_theta = np.radians(rotate_idx * (360 / self.num_rotations))
-            # Compute intermediate features
-            self.interm_feat = self.layers_forward(rotate_theta, input_color_data, input_depth_data)
-            # Forward pass through branches (Standard or Dueling)
+            self.interm_feat = self.feature_tunk(input_color_data, input_depth_data)
             grasp_prediction = self._compute_grasp_prediction(self.interm_feat)
-            # Compute sample grid for rotation AFTER branches
-            affine_mat_after = np.asarray([[np.cos(rotate_theta), np.sin(rotate_theta), 0], [-np.sin(rotate_theta), np.cos(rotate_theta), 0]])
-            affine_mat_after.shape = (2, 3, 1)
-            affine_mat_after = torch.from_numpy(affine_mat_after).permute(2, 0, 1).float()
-            if self.use_cuda:
-                flow_grid_after = F.affine_grid(Variable(affine_mat_after, requires_grad=False).cuda(), grasp_prediction.data.size())
-            else:
-                flow_grid_after = F.affine_grid(Variable(affine_mat_after, requires_grad=False), grasp_prediction.data.size())
-            # Forward pass through branches, undo rotation on output predictions, upsample results
-            self.output_prob.append([F.interpolate(F.grid_sample(grasp_prediction, flow_grid_after), scale_factor=16, mode='bilinear', align_corners=True)])
+            self.output_prob = [[F.interpolate(grasp_prediction, scale_factor=16, mode='bilinear', align_corners=True)]]
             return self.output_prob, self.interm_feat
         
     
     def layers_forward(self, rotate_theta, input_color_data, input_depth_data):
-#        """ Reduces the repetitive forward pass code across multiple model classes. See PixelNet forward() and responsive_net forward().
-#        """
-#        # Compute sample grid for rotation BEFORE neural network
-        affine_mat_before = np.asarray([[np.cos(-rotate_theta), np.sin(-rotate_theta), 0],[-np.sin(-rotate_theta), np.cos(-rotate_theta), 0]])
-        affine_mat_before.shape = (2, 3, 1)
-        affine_mat_before = torch.from_numpy(affine_mat_before).permute(2,0,1).float()
+        """
+        호환성 유지용 wrapper (deprecated)
+        num_rotations=1로 고정되어 회전 연산 불필요
+        
+        Args:
+            rotate_theta: 회전 각도 (무시됨)
+            input_color_data: 컬러 이미지 텐서
+            input_depth_data: 깊이 이미지 텐서
+            
+        Returns:
+            interm_feat: 중간 특징
+        """
+        # CUDA 텐서 이동 (필요시)
         if self.use_cuda:
-            flow_grid_before = F.affine_grid(Variable(affine_mat_before, requires_grad=False).cuda(), input_color_data.size())
-        else:
-            flow_grid_before = F.affine_grid(Variable(affine_mat_before, requires_grad=False), input_color_data.size())
-        # Rotate images clockwise
-        if self.use_cuda:
-            rotate_color = F.grid_sample(Variable(input_color_data).cuda(), flow_grid_before)
-            rotate_depth = F.grid_sample(Variable(input_depth_data).cuda(), flow_grid_before)
-        else:
-            rotate_color = F.grid_sample(Variable(input_color_data), flow_grid_before)
-            rotate_depth = F.grid_sample(Variable(input_depth_data), flow_grid_before)
-        # Compute intermediate features
-        interm_feat = self.feature_tunk(rotate_color, rotate_depth )
-        return interm_feat
+            input_color_data = input_color_data.cuda()
+            input_depth_data = input_depth_data.cuda()
+        
+        return self.feature_tunk(input_color_data, input_depth_data)
+
 
     def _initialize_weights(self):
         """
@@ -222,6 +194,8 @@ class DQN(nn.Module):
         주의: self.modules()는 모든 하위 모듈을 순회하므로,
         feature_tunk.dense121의 pretrained weights까지 덮어쓰게 됨.
         따라서 새로 추가된 레이어(graspnet, value_stream, advantage_stream)만 초기화.
+        
+        feature_tunk (FeatureTrunk)는 이미 __init__에서 올바르게 초기화되었으므로 여기서 제외.
         """
         # 초기화할 레이어 목록 (pretrained backbone 제외)
         layers_to_init = []
@@ -233,15 +207,8 @@ class DQN(nn.Module):
             # Standard DQN: graspnet
             layers_to_init.append(self.graspnet)
         
-        # feature_tunk의 새로 추가된 레이어도 초기화 (color_extractor, depth_extractor)
-        # 단, dense121은 pretrained이므로 제외
-        layers_to_init.extend([
-            self.feature_tunk.color_extractor,
-            self.feature_tunk.depth_extractor
-        ])
-        
-        # dense121.conv0만 초기화 (4채널 입력용으로 새로 생성된 레이어)
-        nn.init.kaiming_normal_(self.feature_tunk.dense121.conv0.weight, mode='fan_out', nonlinearity='relu')
+        # feature_tunk는 이미 network.py에서 올바르게 초기화되었으므로 여기서 제외
+        # (이전에는 feature_tunk의 레이어를 여기서도 초기화했으나, 중복이므로 제거)
         
         # 지정된 레이어만 초기화
         for layer in layers_to_init:
@@ -256,4 +223,5 @@ class DQN(nn.Module):
                     if m.bias is not None:
                         nn.init.constant_(m.bias, 0)
         
-        print('[DQN] Initialized new layers only (DenseNet pretrained backbone preserved)')
+        print('[DQN] Initialized new layers only (graspnet/value_stream/advantage_stream)')
+        print('[DQN] DenseNet pretrained backbone preserved')

@@ -112,16 +112,30 @@ class FeatureTrunk(nn.Module):
 
     def __init__(self, pretrained=True):
         super(FeatureTrunk, self).__init__()
+        
+        # 1. DenseNet-121 먼저 로드 (pretrained 가중치 보호)
+        self.dense121 = torchvision.models.densenet.densenet121(pretrained=pretrained).features
+        # 4채널 입력용으로 첫 레이어 교체
+        self.dense121.conv0 = nn.Conv2d(4, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        
+        # 2. 새로 추가된 레이어 생성
         self.color_extractor = BasicBlock(3, 3)
         self.depth_extractor = BasicBlock(1, 1)
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-        self.dense121 = torchvision.models.densenet.densenet121(pretrained=pretrained).features
-        self.dense121.conv0 = nn.Conv2d(4, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        
+        # 3. 새 레이어만 초기화 (DenseNet pretrained 가중치 보존)
+        for layer in [self.color_extractor, self.depth_extractor]:
+            for m in layer.modules():
+                if isinstance(m, nn.Conv2d):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                elif isinstance(m, nn.BatchNorm2d):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+        
+        # 4. dense121.conv0만 초기화 (4채널용으로 새로 생성된 레이어)
+        nn.init.kaiming_normal_(self.dense121.conv0.weight, mode='fan_out', nonlinearity='relu')
+        
+        print('[FeatureTrunk] DenseNet-121 pretrained backbone loaded and preserved')
+        print('[FeatureTrunk] Initialized: color_extractor, depth_extractor, dense121.conv0')
 
     def forward(self, color, depth ):
         return self.dense121(torch.cat((self.color_extractor(color), self.depth_extractor(depth)), dim=1))

@@ -249,6 +249,11 @@ def main(args):
                     
                     predicted_value = np.max(grasp_predictions)
                     print(f'[EXPLORATION] epsilon={current_epsilon:.3f}, random_action={is_random_action}')
+                    
+                    # Epsilon-greedy 로그 기록
+                    trainer.epsilon_log.append([current_epsilon, 1 if is_random_action else 0])
+                    logger.write_to_log('epsilon', trainer.epsilon_log)
+                    
                 # Save predicted confidence value
                 trainer.predicted_value_log.append([predicted_value])
                 logger.write_to_log('predicted-value', trainer.predicted_value_log)

@@ -105,12 +105,30 @@ class DQNTrainer(object):
         GPU에서 저장된 모델도 CPU에서 로드 가능하도록 map_location 처리
         """
         print(f'Loading snapshot from: {snapshot_file}')
+        
         # CPU/GPU 호환을 위해 map_location 추가
         if self.use_cuda:
-            self.model.load_state_dict(torch.load(snapshot_file))
+            state_dict = torch.load(snapshot_file)
         else:
-            self.model.load_state_dict(torch.load(snapshot_file, map_location=torch.device('cpu')))
+            state_dict = torch.load(snapshot_file, map_location=torch.device('cpu'))
+        
+        # 가중치 통계 출력 (검증용)
+        print('[LOAD] Verifying snapshot weights...')
+        for key, param in state_dict.items():
+            if 'graspnet.0.weight' in key or 'value_stream.0.weight' in key or 'advantage_stream.0.weight' in key:
+                print(f'  {key}: mean={param.mean():.6f}, std={param.std():.6f}, shape={tuple(param.shape)}')
+                break
+        
+        # 가중치 로드
+        self.model.load_state_dict(state_dict)
         print('Pre-trained model snapshot loaded successfully.')
+        
+        # 로드 후 검증
+        for name, param in self.model.named_parameters():
+            if 'graspnet.0.weight' in name or 'value_stream.0.weight' in name or 'advantage_stream.0.weight' in name:
+                print(f'[VERIFY] {name}: mean={param.data.mean():.6f}, std={param.data.std():.6f}')
+                break
+
 
     def _initialize_target_network(self):
         """
@@ -235,6 +253,7 @@ class DQNTrainer(object):
         self.grasp_success_log = []
         self.place_success_log = []
         self.change_detected_log = []
+        self.epsilon_log = []  # [epsilon, is_random] - Epsilon-greedy 탐색 기록
         
         # 균형 잡힌 Experience Replay를 위한 분리된 버퍼
         # 성공/실패 샘플을 별도로 저장하여 1:1 비율로 균형 샘플링
@@ -275,7 +294,8 @@ class DQNTrainer(object):
             'clearance.log.txt': ('clearance_log', 1),                  # [value]
             'grasp-success.log.txt': ('grasp_success_log', 1),          # [success]
             'place-success.log.txt': ('place_success_log', 1),          # [success]
-            'change-detected.log.txt': ('change_detected_log', 1)       # [detected]
+            'change-detected.log.txt': ('change_detected_log', 1),      # [detected]
+            'epsilon.log.txt': ('epsilon_log', 2)                       # [epsilon, is_random]
         }
         for filename, (attr_name, expected_cols) in log_file_mapping.items():
             filepath = os.path.join(transitions_directory, filename)
@@ -395,12 +415,9 @@ class DQNTrainer(object):
         if self.method == 'reinforcement':
             # [패딩 제거 후] 출력을 원본 크기로 리사이즈 (640 → 320)
             # output_prob[0][0]: [1, 1, 640, 640]
-            q_map_640 = output_prob[0][0].cpu().data.numpy()[0, 0]  # [640, 640]
-            
-            # 원본 크기로 리사이즈
-            grasp_predictions = cv2.resize(q_map_640, (original_width, original_height), 
-                                          interpolation=cv2.INTER_LINEAR)
-            grasp_predictions = grasp_predictions.reshape(1, original_height, original_width)  # [1, H, W]
+            # 변경 후: 320 출력을 그대로 사용 (리사이즈 불필요!)
+            grasp_predictions = output_prob[0][0].cpu().data.numpy()[0, 0]
+            grasp_predictions = grasp_predictions.reshape(1, 320, 320)
 
         return grasp_predictions, state_feat
 
@@ -498,9 +515,9 @@ class DQNTrainer(object):
                 if grasp_success == 1:      # 성공: +1.0
                     current_reward = 1.0
                 elif grasp_success == -1:   # 바닥 선택: -0.5 (더 나쁨)
-                    current_reward = -0.5
+                    current_reward = -0.1
                 elif grasp_success == 0:    # 일반 실패: -0.25
-                    current_reward = -0.25
+                    current_reward = -0.1
             # Compute future reward
             # grasp_success: 1=성공, 0=일반실패, -1=바닥선택
             # 바닥 선택(-1)은 무조건 future_reward = 0 (bootstrapping 방지)

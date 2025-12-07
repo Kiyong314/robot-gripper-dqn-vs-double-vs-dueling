@@ -48,6 +48,8 @@ def evaluate_single_checkpoint(snapshot_path, num_trials=10, num_objects=10, mod
         '--max_test_trials', str(num_trials),
         '--logging_directory', temp_log_dir,
         '--save_visualizations'
+        #'--dueling_dqn',
+        #'--double_dqn',
     ]
     
     try:
